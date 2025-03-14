@@ -29,7 +29,8 @@ class Image(db.Model):
     filename = db.Column(db.String(255), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
     folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    custom_tags = db.relationship('CustomTag', backref='image', lazy=True)
     
     def __repr__(self):
         return f'<Image {self.filename}>'

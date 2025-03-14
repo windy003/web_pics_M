@@ -25,16 +25,12 @@
             <div class="image-grid">
                 {% for image in folder.images %}
                     <div class="image-card" id="image-{{ image.id }}">
-                        <img src="{{ url_for('uploaded_file', user_id=current_user.id, folder_id=folder.id, filename=image.filename) }}" alt="{{ image.original_filename }}" class="enlargeable-image" onclick="enlargeImage(this)">
+                        <img src="{{ url_for('uploaded_file', user_id=current_user.id, folder_id=folder.id, filename=image.filename) }}" 
+                             alt="{{ image.original_filename }}" 
+                             class="thumbnail"
+                             onclick="enlargeImage(this, {{ image.id }})">
                         <div class="image-info">
                             <span class="image-name">{{ image.original_filename }}</span>
-                            <div class="image-actions">
-                                <a href="{{ url_for('edit_exif', image_id=image.id) }}" class="btn btn-sm">编辑EXIF</a>
-                                <button class="btn btn-sm" onclick="showImageRenameForm({{ image.id }})">重命名</button>
-                                <form method="POST" action="{{ url_for('delete_image', image_id=image.id) }}" class="inline-form" onsubmit="return confirm('确定要删除这张图片吗？')">
-                                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
-                                </form>
-                            </div>
                         </div>
                     </div>
                 {% endfor %}
@@ -49,9 +45,71 @@
 <div id="image-modal" class="modal" onclick="closeModal()">
     <span class="close-btn" onclick="closeModal()">&times;</span>
     <img class="modal-content" id="modal-image">
+    <div class="modal-actions" id="modal-actions">
+        <!-- 编辑按钮将通过JavaScript动态插入 -->
+    </div>
 </div>
 
 <script>
+function enlargeImage(img, imageId) {
+    const modal = document.getElementById("image-modal");
+    const modalImg = document.getElementById("modal-image");
+    const modalActions = document.getElementById("modal-actions");
+    
+    // 显示模态框并设置图片
+    modal.style.display = "block";
+    modalImg.src = img.src;
+    modalImg.alt = img.alt;
+
+    // 动态插入编辑按钮
+    modalActions.innerHTML = `
+        <a href="/edit/image/${imageId}" class="btn btn-sm">编辑EXIF</a>
+        <button class="btn btn-sm" onclick="showImageRenameForm(${imageId})">重命名</button>
+        <form method="POST" action="/delete_image/${imageId}" class="inline-form" onsubmit="return confirm('确定要删除这张图片吗？')">
+            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+        </form>
+    `;
+    
+    // 初始化双指缩放
+    let initialDistance = null;
+    let scale = 1;
+    
+    modalImg.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            e.preventDefault(); // 阻止默认行为
+            initialDistance = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+        }
+    });
+
+    modalImg.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 2 && initialDistance) {
+            e.preventDefault(); // 阻止默认行为
+            const distance = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY
+            );
+            
+            scale = distance / initialDistance;
+            modalImg.style.transform = `scale(${scale})`;
+        }
+    });
+
+    modalImg.addEventListener('touchend', () => {
+        initialDistance = null;
+    });
+}
+
+function closeModal() {
+    const modal = document.getElementById("image-modal");
+    const modalImg = document.getElementById("modal-image");
+    
+    modal.style.display = "none";
+    modalImg.style.transform = 'scale(1)'; // 重置缩放
+}
+
 function showImageRenameForm(imageId) {
     const imageCard = document.getElementById(`image-${imageId}`);
     const currentName = imageCard.querySelector('.image-name').textContent;
@@ -74,28 +132,13 @@ function showImageRenameForm(imageId) {
         .then(data => {
             if (data.success) {
                 imageCard.querySelector('.image-name').textContent = newName.trim();
+                closeModal();
             }
         })
         .catch(error => {
             alert(error.error || '操作失败，请重试');
         });
     }
-}
-
-function enlargeImage(img) {
-    // 获取模态框和模态图片元素
-    const modal = document.getElementById("image-modal");
-    const modalImg = document.getElementById("modal-image");
-    
-    // 显示模态框并设置图片
-    modal.style.display = "block";
-    modalImg.src = img.src;
-    modalImg.alt = img.alt;
-}
-
-function closeModal() {
-    // 隐藏模态框
-    document.getElementById("image-modal").style.display = "none";
 }
 
 // 点击ESC键关闭模态框
@@ -105,4 +148,101 @@ document.addEventListener('keydown', function(event) {
     }
 });
 </script>
+
+<style>
+/* 缩略图样式 */
+.thumbnail {
+    width: 150px;
+    height: 150px;
+    object-fit: cover;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.thumbnail:hover {
+    transform: scale(1.05);
+}
+
+/* 图片网格样式 */
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.image-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px;
+    text-align: center;
+}
+
+.image-info {
+    margin-top: 10px;
+}
+
+.image-name {
+    font-size: 0.9em;
+    word-break: break-all;
+}
+
+/* 模态框样式 */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    padding-top: 60px;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.9);
+}
+
+.modal-content {
+    margin: auto;
+    display: block;
+    max-width: 90%;
+    max-height: 80vh;
+    object-fit: contain;
+    touch-action: none;
+}
+
+.modal-actions {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    background: rgba(0,0,0,0.5);
+    padding: 10px;
+    border-radius: 5px;
+}
+
+.modal-actions .btn {
+    color: white;
+}
+
+.close-btn {
+    position: absolute;
+    top: 20px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    transition: 0.3s;
+    cursor: pointer;
+}
+
+.close-btn:hover,
+.close-btn:focus {
+    color: #bbb;
+    text-decoration: none;
+    cursor: pointer;
+}
+</style>
 {% endblock %} 

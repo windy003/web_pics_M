@@ -46,174 +46,57 @@
             {% else %}
                 <p>没有找到EXIF信息</p>
             {% endif %}
-            
-            <div class="add-exif-section">
-                <h3>添加/修改EXIF标签</h3>
-                <form id="add-exif-form">
-                    <div class="form-group">
-                        <label for="tag-name">标签名称:</label>
-                        <input type="text" id="tag-name" name="tag-name"  required>
-                    </div>
-                    <div class="form-group">
-                        <label for="tag-value">标签值:</label>
-                        <input type="text" id="tag-value" name="tag-value" required>
-                    </div>
-                    <button type="submit" class="btn">添加/修改</button>
-                </form>
-            </div>
         </div>
-        
+
         <div class="custom-tags-section">
-            <h2>自定义标签</h2>
+            <h2>添加UserComment标签</h2>
             
             <div class="add-tag-form">
-                <form id="add-tag-form" onsubmit="addCustomTag(event)">
-                    <input type="text" name="tag_name" placeholder="标签名" required>
-                    <input type="text" name="tag_value" placeholder="标签值" required>
-                    <button type="submit" class="btn btn-sm">添加标签</button>
+                <form id="add-tag-form" method="POST" action="{{ url_for('add_exif_tag', image_id=image_id) }}">
+                    <div class="form-group">
+                        <label for="tag_value">UserComment内容</label>
+                        <input type="text" id="tag_value" name="tag_value" placeholder="输入标签内容" required>
+                    </div>
+                    <button type="submit" class="btn">添加到EXIF</button>
                 </form>
             </div>
-            
-            <div class="custom-tags-list">
-                {% for tag in custom_tags %}
-                    <div class="custom-tag-item" id="custom-tag-{{ tag.id }}">
-                        <span class="tag-name">{{ tag.tag_name }}</span>
-                        <span class="tag-value">{{ tag.tag_value }}</span>
-                        <button class="btn btn-sm btn-danger" onclick="deleteCustomTag({{ tag.id }})">删除</button>
-                    </div>
-                {% endfor %}
-            </div>
         </div>
+        
+        <!-- 显示Flash消息 -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="flash-messages">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
         
         <div class="actions">
-            <a href="{{ url_for('index') }}" class="btn">返回首页</a>
+            <a href="{{ url_for('view_folder', folder_id=folder_id) }}" class="btn">返回文件夹</a>
         </div>
     </div>
-    
-    <script>
-        // 添加EXIF标签
-        document.getElementById('add-exif-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const tagName = document.getElementById('tag-name').value;
-            const tagValue = document.getElementById('tag-value').value;
-            
-            if (!tagName || !tagValue) {
-                alert('标签名和值不能为空');
-                return;
-            }
-            
-            fetch(`/api/exif/{{ filename }}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    action: 'add',
-                    tag_name: tagName,
-                    value: tagValue
-                }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert(data.message);
-                    // 刷新页面以显示更新后的EXIF数据
-                    location.reload();
-                } else {
-                    alert(data.error || '操作失败');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('操作失败，请重试');
-            });
-        });
-        
-        // 删除EXIF标签
-        function deleteExif(tagId) {
-            if (!confirm('确定要删除这个EXIF标签吗？')) {
-                return;
-            }
-            
-            fetch(`/api/exif/{{ filename }}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    action: 'delete',
-                    tag_id: tagId
-                }),
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert(data.message);
-                    // 刷新页面以显示更新后的EXIF数据
-                    location.reload();
-                } else {
-                    alert(data.error || '操作失败');
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('操作失败，请重试');
-            });
-        }
 
-        function addCustomTag(event) {
-            event.preventDefault();
-            const form = event.target;
-            const formData = new FormData(form);
-            
-            fetch('/image/{{ image_id }}/add_tag', {
-                method: 'POST',
-                body: formData
+    <script>
+    function deleteExif(tagId) {
+        if (confirm('确定要删除这个EXIF标签吗？')) {
+            fetch('/api/exif/{{ image_id }}/delete/' + tagId, {
+                method: 'POST'
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
                     location.reload(); // 刷新页面
                 } else {
-                    alert(data.error || '添加标签失败');
+                    alert(data.error || '删除标签失败');
                 }
             })
             .catch(error => {
                 alert('操作失败，请重试');
             });
         }
-
-        function deleteCustomTag(tagId) {
-            if (confirm('确定要删除这个标签吗？')) {
-                fetch('/image/{{ image_id }}/delete_tag/' + tagId, {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('custom-tag-' + tagId).remove();
-                    } else {
-                        alert(data.error || '删除标签失败');
-                    }
-                })
-                .catch(error => {
-                    alert('操作失败，请重试');
-                });
-            }
-        }
+    }
     </script>
-
-    <form method="POST" action="{{ url_for('update_exif_by_image_id', image_id=image_id) }}">
-        <div class="form-group">
-            <label for="tag_name">标签名</label>
-            <input type="text" id="tag_name" name="tag_name" required>
-        </div>
-        <div class="form-group">
-            <label for="tag_value">标签值</label>
-            <input type="text" id="tag_value" name="tag_value" required>
-        </div>
-        <button type="submit" class="btn">更新</button>
-    </form>
 </body>
 </html> 

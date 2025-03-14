@@ -6,6 +6,12 @@ from werkzeug.utils import secure_filename
 from exif_utils import get_exif_data, modify_exif_info, get_unused_tag_id
 from models import db, User, Folder, Image, CustomTag
 from datetime import datetime
+from flask_migrate import Migrate
+from PIL import Image as PILImage
+import piexif
+import json
+from io import BytesIO
+import base64
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'  # 用于flash消息
@@ -19,6 +25,9 @@ db.init_app(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# 在创建 app 和 db 之后
+migrate = Migrate(app, db)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -125,8 +134,6 @@ def uploaded_file(user_id, folder_id, filename):
     
     return send_file(file_path)
 
-
-
 @app.route('/edit/image/<int:image_id>')
 @login_required
 def edit_exif(image_id):
@@ -143,24 +150,13 @@ def edit_exif(image_id):
         str(image.folder_id),
         image.filename
     ))
-
-    print(f"\n1\n")
-    print(exif_data,tag_ids)
-    
-    # 获取自定义标签
-    custom_tags = CustomTag.query.filter_by(image_id=image_id).all()
     
     return render_template('edit.html',
                           filename=image.filename,
                           exif_data=exif_data,
                           tag_ids=tag_ids,
                           folder_id=image.folder_id,
-                          custom_tags=custom_tags,
-                          image_id=image_id)  # 传递 image_id
-
-
-
-
+                          image_id=image_id)
 
 @app.route('/api/exif/<filename>', methods=['GET'])
 def get_exif(filename):
@@ -202,7 +198,7 @@ def update_exif_by_filename(filename):
     
     # 更新EXIF信息
     try:
-        # 这里添加更新逻辑
+        # 这里添加更新EXIF的逻辑
         # 例如：更新数据库中的EXIF字段
         db.session.commit()
         return jsonify({'success': True})
@@ -210,35 +206,144 @@ def update_exif_by_filename(filename):
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/image/<int:image_id>/delete', methods=['POST'])
+@app.route('/api/exif/<int:image_id>/delete/<tag_id>', methods=['POST'])
 @login_required
-def delete_image(image_id):
-    # 获取图片记录
+def delete_exif_tag(image_id, tag_id):
     image = Image.query.get_or_404(image_id)
     
-    # 检查权限（确保用户只能删除自己文件夹中的图片）
+    # 检查权限
     if image.folder.user_id != current_user.id:
-        flash('没有权限删除此图片')
-        return redirect(url_for('index'))
+        return jsonify({'success': False, 'error': '没有权限'}), 403
     
     # 构建文件路径
-    filepath = os.path.join(
+    file_path = os.path.join(
         app.config['UPLOAD_FOLDER'],
         str(current_user.id),
         str(image.folder_id),
         image.filename
     )
     
-    # 删除文件
-    if os.path.exists(filepath):
-        os.remove(filepath)
+    try:
+        # 读取图片
+        img = PILImage.open(file_path)
+        
+        # 读取现有EXIF数据
+        exif_dict = piexif.load(img.info.get('exif', b''))
+        
+        # 解析标签ID和IFD
+        parts = tag_id.split('.')
+        if len(parts) != 2:
+            return jsonify({'success': False, 'error': '无效的标签ID'}), 400
+        
+        ifd, tag_id = parts
+        tag_id = int(tag_id, 16)  # 将十六进制字符串转换为整数
+        
+        # 删除EXIF标签
+        if ifd in exif_dict and tag_id in exif_dict[ifd]:
+            del exif_dict[ifd][tag_id]
+            
+            # 将EXIF数据写回图片
+            exif_bytes = piexif.dump(exif_dict)
+            img.save(file_path, exif=exif_bytes)
+            
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': '标签不存在'}), 404
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/image/<int:image_id>/add_tag', methods=['POST'])
+@login_required
+def add_custom_tag(image_id):
+    image = Image.query.get_or_404(image_id)
     
-    # 删除数据库记录
-    db.session.delete(image)
+    # 检查权限
+    if image.folder.user_id != current_user.id:
+        return jsonify({'success': False, 'error': '没有权限'}), 403
+    
+    tag_name = request.form.get('tag_name')
+    tag_value = request.form.get('tag_value')
+    
+    if not tag_name or not tag_value:
+        return jsonify({'success': False, 'error': '标签名和值不能为空'}), 400
+    
+    # 创建自定义标签
+    custom_tag = CustomTag(
+        image_id=image_id,
+        tag_name=tag_name,
+        tag_value=tag_value
+    )
+    db.session.add(custom_tag)
     db.session.commit()
     
-    flash('图片已删除')
-    return redirect(url_for('view_folder', folder_id=image.folder_id))
+    return jsonify({'success': True})
+
+@app.route('/image/<int:image_id>/delete_tag/<int:tag_id>', methods=['POST'])
+@login_required
+def delete_custom_tag(image_id, tag_id):
+    custom_tag = CustomTag.query.get_or_404(tag_id)
+    
+    # 检查权限
+    if custom_tag.image.folder.user_id != current_user.id:
+        return jsonify({'success': False, 'error': '没有权限'}), 403
+    
+    db.session.delete(custom_tag)
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+@app.route('/image/<int:image_id>/rename', methods=['POST'])
+@login_required
+def rename_image(image_id):
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限
+    if image.folder.user_id != current_user.id:
+        return jsonify({'success': False, 'error': '没有权限'}), 403
+    
+    # 获取新名称
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({'success': False, 'error': '缺少名称参数'}), 400
+    
+    new_name = data['name'].strip()
+    if not new_name:
+        return jsonify({'success': False, 'error': '新名称不能为空'}), 400
+    
+    # 更新文件名
+    image.original_filename = new_name
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+@app.route('/image/<int:image_id>/update', methods=['POST'])
+@login_required
+def update_exif_by_image_id(image_id):
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限
+    if image.folder.user_id != current_user.id:
+        abort(403)
+    
+    # 获取表单数据
+    tag_name = request.form.get('tag_name')
+    tag_value = request.form.get('tag_value')
+    
+    if not tag_name or not tag_value:
+        flash('标签名和值不能为空', 'error')
+        return redirect(url_for('edit_exif', image_id=image_id))
+    
+    # 更新EXIF信息或自定义标签
+    try:
+        # 这里添加更新逻辑
+        # 例如：更新数据库中的EXIF字段或添加自定义标签
+        db.session.commit()
+        flash('更新成功', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash('更新失败: ' + str(e), 'error')
+    
+    return redirect(url_for('edit_exif', image_id=image_id))
 
 @app.route('/folder/create', methods=['POST'])
 @login_required
@@ -367,13 +472,16 @@ def upload_image(folder_id):
             # 生成唯一文件名
             unique_filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{filename}"
             
-            # 保存文件
-            file_path = os.path.join(
+            # 确保目录存在
+            file_dir = os.path.join(
                 app.config['UPLOAD_FOLDER'],
                 str(current_user.id),
-                str(folder_id),
-                unique_filename
+                str(folder_id)
             )
+            os.makedirs(file_dir, exist_ok=True)
+            
+            # 保存文件
+            file_path = os.path.join(file_dir, unique_filename)
             file.save(file_path)
             
             # 创建图片记录
@@ -390,73 +498,81 @@ def upload_image(folder_id):
     
     return redirect(url_for('view_folder', folder_id=folder_id))
 
-@app.route('/image/<int:image_id>/rename', methods=['POST'])
+@app.route('/api/exif/<int:image_id>/add', methods=['POST'])
 @login_required
-def rename_image(image_id):
+def add_exif_tag(image_id):
     image = Image.query.get_or_404(image_id)
     
     # 检查权限
     if image.folder.user_id != current_user.id:
-        return jsonify({'success': False, 'error': '没有权限'}), 403
+        flash('没有权限修改此图片', 'error')
+        return redirect(url_for('edit_exif', image_id=image_id))
     
-    # 获取新名称
-    data = request.get_json()
-    if not data or 'name' not in data:
-        return jsonify({'success': False, 'error': '缺少名称参数'}), 400
-    
-    new_name = data['name'].strip()
-    if not new_name:
-        return jsonify({'success': False, 'error': '新名称不能为空'}), 400
-    
-    # 更新文件名
-    image.original_filename = new_name
-    db.session.commit()
-    
-    return jsonify({'success': True})
-
-@app.route('/image/<int:image_id>/add_tag', methods=['POST'])
-@login_required
-def add_custom_tag(image_id):
-    image = Image.query.get_or_404(image_id)
-    
-    # 检查权限
-    if image.folder.user_id != current_user.id:
-        return jsonify({'success': False, 'error': '没有权限'}), 403
-    
-    tag_name = request.form.get('tag_name')
+    # 获取表单数据 - 只获取标签值
     tag_value = request.form.get('tag_value')
     
-    if not tag_name or not tag_value:
-        return jsonify({'success': False, 'error': '标签名和值不能为空'}), 400
+    if not tag_value:
+        flash('标签值不能为空', 'error')
+        return redirect(url_for('edit_exif', image_id=image_id))
     
-    # 创建自定义标签
-    custom_tag = CustomTag(
-        image_id=image_id,
-        tag_name=tag_name,
-        tag_value=tag_value
+    # 构建文件路径
+    file_path = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(current_user.id),
+        str(image.folder_id),
+        image.filename
     )
-    db.session.add(custom_tag)
-    db.session.commit()
     
-    return jsonify({'success': True})
-
-@app.route('/image/<int:image_id>/delete_tag/<int:tag_id>', methods=['POST'])
-@login_required
-def delete_custom_tag(image_id, tag_id):
-    custom_tag = CustomTag.query.get_or_404(tag_id)
+    try:
+        # 读取图片
+        img = PILImage.open(file_path)
+        
+        # 确保图片格式支持EXIF
+        if img.format not in ['JPEG', 'TIFF']:
+            flash(f'图片格式 {img.format} 不支持EXIF数据', 'error')
+            return redirect(url_for('edit_exif', image_id=image_id))
+        
+        # 创建一个新的EXIF字典
+        zeroth_ifd = {}
+        exif_ifd = {}
+        gps_ifd = {}
+        
+        # 尝试读取现有EXIF数据
+        try:
+            exif_data = img.info.get('exif')
+            if exif_data:
+                exif_dict = piexif.load(exif_data)
+                zeroth_ifd = exif_dict.get("0th", {})
+                exif_ifd = exif_dict.get("Exif", {})
+                gps_ifd = exif_dict.get("GPS", {})
+        except:
+            # 如果读取失败，使用空字典
+            pass
+        
+        # 直接将文本数据转换为二进制并存储在UserComment字段中
+        # UserComment需要特定格式：前8字节为字符集标识符，后面为实际内容
+        # 使用ASCII字符集（前8字节为ASCII\0\0\0）
+        exif_ifd[piexif.ExifIFD.UserComment] = b'ASCII\0\0\0' + tag_value.encode('utf-8', errors='replace')
+        
+        # 创建新的EXIF字典
+        exif_dict = {"0th": zeroth_ifd, "Exif": exif_ifd, "GPS": gps_ifd}
+        
+        # 将EXIF数据写回图片
+        exif_bytes = piexif.dump(exif_dict)
+        
+        # 保存图片
+        img.save(file_path, exif=exif_bytes)
+        
+        flash('EXIF标签添加成功', 'success')
+    except Exception as e:
+        print(f"错误: {str(e)}")
+        flash(f'添加EXIF标签失败: {str(e)}', 'error')
     
-    # 检查权限
-    if custom_tag.image.folder.user_id != current_user.id:
-        return jsonify({'success': False, 'error': '没有权限'}), 403
-    
-    db.session.delete(custom_tag)
-    db.session.commit()
-    
-    return jsonify({'success': True})
+    return redirect(url_for('edit_exif', image_id=image_id))
 
 @app.route('/edit/image/<int:image_id>/update', methods=['POST'])
 @login_required
-def update_exif_by_image_id(image_id):
+def update_exif(image_id):
     image = Image.query.get_or_404(image_id)
     
     # 检查权限

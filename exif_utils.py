@@ -2,6 +2,8 @@ from PIL import Image
 from PIL.ExifTags import TAGS
 import json
 import os
+import piexif
+import base64
 
 def get_exif_data(image_path):
     """
@@ -13,48 +15,78 @@ def get_exif_data(image_path):
         包含EXIF信息的字典，以及标签ID映射
     """
     try:
-        image = Image.open(image_path)
-        exif_data = {}
-        tag_ids = {}  # 存储标签名称和ID的映射
-        custom_tag_names = {}  # 存储自定义标签ID到名称的映射
+        # 打开图片
+        img = Image.open(image_path)
         
-        # 检查图片是否有EXIF信息
-        if hasattr(image, '_getexif') and image._getexif():
-            exif_info = image._getexif()
-
-            print(2,exif_info)
-            
-            # 首先检查是否有自定义标签名称映射
-            if 64999 in exif_info:
-                try:
-                    # 尝试解析JSON格式的自定义标签映射
-                    custom_tag_names = json.loads(exif_info[64999])
-                except Exception as e:
-                    print(f"解析自定义标签映射时出错: {str(e)}")
-            
-            # 处理所有EXIF标签
-            for tag_id, value in exif_info.items():
-                # 跳过自定义标签映射
-                if tag_id == 64999:
-                    continue
-                
-                # 获取标签名称
-                if str(tag_id) in custom_tag_names:
-                    # 如果是自定义标签，使用保存的名称
-                    tag_name = custom_tag_names[str(tag_id)]
-                else:
-                    # 否则使用标准EXIF标签名称
-                    tag_name = TAGS.get(tag_id, f"Unknown-{tag_id}")
-                
-                # 存储标签信息
-                exif_data[tag_name] = value
-                tag_ids[tag_name] = tag_id
-            
-            return exif_data, tag_ids
-        else:
-            print(f"图片 {image_path} 没有EXIF信息")
+        # 检查图片格式
+        if img.format not in ['JPEG', 'TIFF']:
+            print(f"图片格式 {img.format} 不支持EXIF数据")
             return {}, {}
-            
+        
+        # 读取EXIF数据
+        exif_data = img.info.get('exif', b'')
+        if not exif_data:
+            return {}, {}
+        
+        exif_dict = piexif.load(exif_data)
+        
+        # 解析EXIF数据
+        parsed_exif = {}
+        tag_ids = {}
+        
+        # 处理0th IFD
+        for tag_id, value in exif_dict.get('0th', {}).items():
+            if tag_id in piexif.TAGS['0th']:
+                tag_name = piexif.TAGS['0th'][tag_id]['name']
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8').strip('\x00')
+                    except UnicodeDecodeError:
+                        value = f"二进制数据 ({len(value)} 字节)"
+                parsed_exif[tag_name] = value
+                tag_ids[tag_name] = f"0th.{hex(tag_id)}"
+        
+        # 处理Exif IFD
+        for tag_id, value in exif_dict.get('Exif', {}).items():
+            if tag_id in piexif.TAGS['Exif']:
+                tag_name = piexif.TAGS['Exif'][tag_id]['name']
+                
+                # 特殊处理UserComment标签
+                if tag_id == piexif.ExifIFD.UserComment:
+                    try:
+                        # 跳过前8个字节（字符集标识符）
+                        if len(value) > 8:
+                            comment_value = value[8:].decode('utf-8', errors='replace')
+                            parsed_exif['UserComment'] = comment_value
+                        else:
+                            parsed_exif['UserComment'] = value.decode('utf-8', errors='replace')
+                        tag_ids['UserComment'] = f"Exif.{hex(tag_id)}"
+                        continue
+                    except Exception as e:
+                        print(f"解析UserComment时出错: {str(e)}")
+                        # 如果解析失败，按普通方式处理
+                
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8').strip('\x00')
+                    except UnicodeDecodeError:
+                        value = f"二进制数据 ({len(value)} 字节)"
+                parsed_exif[tag_name] = value
+                tag_ids[tag_name] = f"Exif.{hex(tag_id)}"
+        
+        # 处理GPS IFD
+        for tag_id, value in exif_dict.get('GPS', {}).items():
+            if tag_id in piexif.TAGS['GPS']:
+                tag_name = piexif.TAGS['GPS'][tag_id]['name']
+                if isinstance(value, bytes):
+                    try:
+                        value = value.decode('utf-8').strip('\x00')
+                    except UnicodeDecodeError:
+                        value = f"二进制数据 ({len(value)} 字节)"
+                parsed_exif[tag_name] = value
+                tag_ids[tag_name] = f"GPS.{hex(tag_id)}"
+        
+        return parsed_exif, tag_ids
     except Exception as e:
         print(f"读取图片 {image_path} 时出错: {str(e)}")
         return {}, {}
