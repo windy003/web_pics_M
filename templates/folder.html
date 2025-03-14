@@ -55,35 +55,12 @@
 </div>
 
 <!-- 全屏显示容器 -->
-<div id="image-modal" class="modal" onclick="closeModal()">
+<div id="image-modal" class="modal" ">
+    <!-- onclick="closeModal()  "这个是在上面的" -->
     <span class="close-btn" onclick="closeModal()">&times;</span>
-    <img class="modal-content" id="modal-image">
+    <img class="modal-content  fullscreen-image" id="modal-image">
 </div>
 
-<!-- 在页面底部添加模态框 -->
-<div class="modal fade" id="renameModal" tabindex="-1" aria-labelledby="renameModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="renameModalLabel">重命名图片</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <form action="{{ url_for('rename_image') }}" method="post">
-                <div class="modal-body">
-                    <input type="hidden" id="image_id" name="image_id">
-                    <div class="mb-3">
-                        <label for="new_filename" class="form-label">新文件名</label>
-                        <input type="text" class="form-control" id="new_filename" name="new_filename" required>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-primary">保存</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
 
 <!-- 确保 Bootstrap JS 正确加载 -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
@@ -92,52 +69,43 @@
 function enlargeImage(img, imageId) {
     const modal = document.getElementById("image-modal");
     const modalImg = document.getElementById("modal-image");
-    const modalActions = document.getElementById("modal-actions");
     
     // 显示模态框并设置图片
     modal.style.display = "block";
     modalImg.src = img.src;
     modalImg.alt = img.alt;
 
-    // 动态插入编辑按钮
-    modalActions.innerHTML = `
-        <a href="/edit/image/${imageId}" class="btn btn-sm">编辑EXIF</a>
-        <button class="btn btn-sm" onclick="showImageRenameForm(${imageId})">重命名</button>
-        <form method="POST" action="/delete_image/${imageId}" class="inline-form" onsubmit="return confirm('确定要删除这张图片吗？')">
-            <button type="submit" class="btn btn-sm btn-danger">删除</button>
-        </form>
-    `;
+   
     
-    // 初始化双指缩放
-    let initialDistance = null;
-    let scale = 1;
-    
-    modalImg.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 2) {
-            e.preventDefault(); // 阻止默认行为
-            initialDistance = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-        }
-    });
+    // 使用 Hammer.js 处理移动端手势
+    const imageElement = document.querySelector('.fullscreen-image');
+    if (imageElement) {
+        const hammer = new Hammer(imageElement);
 
-    modalImg.addEventListener('touchmove', (e) => {
-        if (e.touches.length === 2 && initialDistance) {
-            e.preventDefault(); // 阻止默认行为
-            const distance = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY
-            );
-            
-            scale = distance / initialDistance;
-            modalImg.style.transform = `scale(${scale})`;
-        }
-    });
+        // 启用捏合缩放
+        hammer.get('pinch').set({ enable: true });
 
-    modalImg.addEventListener('touchend', () => {
-        initialDistance = null;
-    });
+        // 处理缩放事件
+        hammer.on('pinch', function(e) {
+            const scale = e.scale;
+            imageElement.style.transform = `scale(${scale})`;
+        });
+
+        // 调试触摸事件
+        imageElement.addEventListener('touchstart', function(e) {
+            console.log('触摸开始', e);
+        }, { passive: true });
+
+        imageElement.addEventListener('touchmove', function(e) {
+            console.log('触摸移动', e);
+        }, { passive: true });
+
+        imageElement.addEventListener('touchend', function(e) {
+            console.log('触摸结束', e);
+        }, { passive: true });
+    } else {
+        console.error('未找到全屏图片元素');
+    }
 }
 
 function closeModal() {
@@ -212,6 +180,11 @@ function prepareRenameModal(imageId, currentFilename) {
     let filename = currentFilename.split('.').slice(0, -1).join('.');
     document.getElementById('new_filename').value = filename;
 }
+
+// 移除可能存在的阻止默认行为的代码
+document.addEventListener('touchstart', function(e) {
+    e.stopPropagation(); // 移除这行如果存在
+}, { passive: true });
 </script>
 
 <style>
@@ -276,21 +249,6 @@ function prepareRenameModal(imageId, currentFilename) {
     touch-action: none;
 }
 
-.modal-actions {
-    position: absolute;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 10px;
-    background: rgba(0,0,0,0.5);
-    padding: 10px;
-    border-radius: 5px;
-}
-
-.modal-actions .btn {
-    color: white;
-}
 
 .close-btn {
     position: absolute;
@@ -308,6 +266,10 @@ function prepareRenameModal(imageId, currentFilename) {
     color: #bbb;
     text-decoration: none;
     cursor: pointer;
+}
+
+.fullscreen-image {
+    touch-action: pinch-zoom; /* 允许捏合缩放 */
 }
 </style>
 {% endblock %} 
