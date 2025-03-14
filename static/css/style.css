@@ -336,3 +336,45 @@ nav span {
     text-decoration: none;
     cursor: pointer;
 }
+
+.custom-tags-section {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #f5f5f5;
+    border-radius: 5px;
+}
+
+.add-tag-form {
+    margin-bottom: 20px;
+}
+
+.add-tag-form input {
+    margin-right: 10px;
+    padding: 5px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.custom-tags-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.custom-tag-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.tag-name {
+    font-weight: bold;
+}
+
+.tag-value {
+    flex-grow: 1;
+}

@@ -21,6 +21,8 @@ def get_exif_data(image_path):
         # 检查图片是否有EXIF信息
         if hasattr(image, '_getexif') and image._getexif():
             exif_info = image._getexif()
+
+            print(2,exif_info)
             
             # 首先检查是否有自定义标签名称映射
             if 64999 in exif_info:
