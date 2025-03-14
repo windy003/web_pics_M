@@ -4,7 +4,10 @@ import os
 import uuid
 from werkzeug.utils import secure_filename
 from exif_utils import get_exif_data, modify_exif_info, get_unused_tag_id
-from models import db, User, Folder, Image, CustomTag
+from models import db, User, Folder, Image
+
+
+# CustomTag
 from datetime import datetime
 from flask_migrate import Migrate
 from PIL import Image as PILImage
@@ -19,6 +22,11 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
+MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 限制上传文件大小为16MB 
 
 # 初始化扩展
 db.init_app(app)
@@ -598,6 +606,47 @@ def update_exif(image_id):
         flash('更新失败: ' + str(e), 'error')
     
     return redirect(url_for('edit_exif', image_id=image_id))
+
+@app.route('/folder/<int:folder_id>/image/<int:image_id>/delete', methods=['POST'])
+@login_required
+def delete_image(folder_id, image_id):
+    # 获取图片
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限
+    if image.folder.user_id != current_user.id:
+        flash('没有权限删除此图片', 'error')
+        return redirect(url_for('view_folder', folder_id=folder_id))
+    
+    # 检查图片是否属于指定文件夹
+    if image.folder_id != folder_id:
+        flash('图片不属于此文件夹', 'error')
+        return redirect(url_for('view_folder', folder_id=folder_id))
+    
+    try:
+        # 构建文件路径
+        file_path = os.path.join(
+            app.config['UPLOAD_FOLDER'],
+            str(current_user.id),
+            str(folder_id),
+            image.filename
+        )
+        
+        # 删除文件
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        
+        # 删除图片记录
+        db.session.delete(image)
+        db.session.commit()
+        
+        flash('图片删除成功', 'success')
+    except Exception as e:
+        db.session.rollback()
+        print(f"删除图片时出错: {str(e)}")
+        flash(f'删除图片失败: {str(e)}', 'error')
+    
+    return redirect(url_for('view_folder', folder_id=folder_id))
 
 if __name__ == '__main__':
     app.run(debug=True,port=5004,host='0.0.0.0')

@@ -74,11 +74,12 @@ h1, h2, h3 {
 }
 
 .btn-danger {
-    background-color: #f44336;
+    background-color: #dc3545;
+    color: white;
 }
 
 .btn-danger:hover {
-    background-color: #d32f2f;
+    background-color: #c82333;
 }
 
 .btn-sm {
@@ -119,6 +120,7 @@ h1, h2, h3 {
     padding: 10px;
     display: flex;
     justify-content: space-between;
+    margin-top: 5px;
 }
 
 .delete-form {

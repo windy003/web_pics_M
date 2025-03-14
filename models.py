@@ -30,17 +30,6 @@ class Image(db.Model):
     original_filename = db.Column(db.String(255), nullable=False)
     folder_id = db.Column(db.Integer, db.ForeignKey('folder.id'), nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
-    custom_tags = db.relationship('CustomTag', backref='image', lazy=True)
     
     def __repr__(self):
         return f'<Image {self.filename}>'
-
-class CustomTag(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    image_id = db.Column(db.Integer, db.ForeignKey('image.id'), nullable=False)
-    tag_name = db.Column(db.String(80), nullable=False)
-    tag_value = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f'<CustomTag {self.tag_name}: {self.tag_value}>' 

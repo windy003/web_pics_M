@@ -31,6 +31,12 @@
                              onclick="enlargeImage(this, {{ image.id }})">
                         <div class="image-info">
                             <span class="image-name">{{ image.original_filename }}</span>
+                            <div class="image-actions">
+                                <a href="{{ url_for('edit_exif', image_id=image.id) }}" class="btn btn-sm">编辑EXIF</a>
+                                <form method="POST" action="{{ url_for('delete_image', folder_id=folder.id, image_id=image.id) }}" class="delete-form" onsubmit="return confirm('确定要删除此图片吗？')">
+                                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                </form>
+                            </div>
                         </div>
                     </div>
                 {% endfor %}
@@ -146,6 +152,13 @@ document.addEventListener('keydown', function(event) {
     if (event.key === "Escape") {
         closeModal();
     }
+});
+
+// 确保点击删除按钮时不会触发enlargeImage函数
+document.querySelectorAll('.delete-form button').forEach(button => {
+    button.addEventListener('click', function(event) {
+        event.stopPropagation();
+    });
 });
 </script>
 
