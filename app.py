@@ -17,7 +17,7 @@ from io import BytesIO
 import base64
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # 用于flash消息
+app.secret_key = os.environ.get('SECRET_KEY')  # 用于flash消息
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
