@@ -33,9 +33,9 @@
                             <span class="image-name">{{ image.original_filename }}</span>
                             <div class="image-actions">
                                 <a href="{{ url_for('edit_exif', image_id=image.id) }}" class="btn btn-sm">编辑EXIF</a>
-                                <form method="POST" action="{{ url_for('rename_image', folder_id=folder.id, image_id=image.id) }}" class="btn btn-sm" onsubmit="return confirm('确定要重命名此图片吗？')">
-                                    <button type="submit" class="btn btn-sm btn-danger">重命名</button>
-                                </form>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="showRenameModal('{{ image.id }}', '{{ image.original_filename }}')">
+                                    重命名
+                                </button>
                                 <form method="POST" action="{{ url_for('delete_image', folder_id=folder.id, image_id=image.id) }}" class="delete-form" onsubmit="return confirm('确定要删除此图片吗？')">
                                     <button type="submit" class="btn btn-sm btn-danger">删除</button>
                                 </form>
@@ -56,6 +56,31 @@
     <img class="modal-content" id="modal-image">
     <div class="modal-actions" id="modal-actions">
         <!-- 编辑按钮将通过JavaScript动态插入 -->
+    </div>
+</div>
+
+<!-- 在页面底部添加模态框 -->
+<div class="modal fade" id="renameModal" tabindex="-1" aria-labelledby="renameModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="renameModalLabel">重命名图片</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('rename_image') }}" method="post">
+                <div class="modal-body">
+                    <input type="hidden" id="image_id" name="image_id">
+                    <div class="mb-3">
+                        <label for="new_filename" class="form-label">新文件名</label>
+                        <input type="text" class="form-control" id="new_filename" name="new_filename" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -163,6 +188,21 @@ document.querySelectorAll('.delete-form button').forEach(button => {
         event.stopPropagation();
     });
 });
+
+function showRenameModal(imageId, currentFilename) {
+    console.log("打开重命名模态框，图片ID:", imageId, "当前文件名:", currentFilename);
+    
+    // 设置要重命名的图片ID
+    document.getElementById('image_id').value = imageId;
+    
+    // 设置当前文件名作为默认值（去掉扩展名）
+    let filename = currentFilename.split('.').slice(0, -1).join('.');
+    document.getElementById('new_filename').value = filename;
+    
+    // 显示模态框
+    var renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
+    renameModal.show();
+}
 </script>
 
 <style>

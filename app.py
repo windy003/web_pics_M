@@ -627,11 +627,20 @@ def delete_image(folder_id, image_id):
 @app.route('/rename_image', methods=['POST'])
 @login_required
 def rename_image():
+    # 打印所有表单数据以进行调试
+    app.logger.debug(f"所有表单数据: {request.form}")
+    
     image_id = request.form.get('image_id')
     new_filename = request.form.get('new_filename')
     
+    app.logger.debug(f"图片ID: {image_id}, 新文件名: {new_filename}")
+    
     if not image_id or not new_filename:
-        flash('请提供有效的图片ID和新文件名', 'danger')
+        # 记录更详细的错误信息
+        if not image_id:
+            flash('未提供图片ID', 'danger')
+        if not new_filename:
+            flash('未提供新文件名', 'danger')
         return redirect(url_for('index'))
     
     try:
