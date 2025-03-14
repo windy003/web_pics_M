@@ -300,30 +300,6 @@ def delete_custom_tag(image_id, tag_id):
     
     return jsonify({'success': True})
 
-@app.route('/image/<int:image_id>/rename', methods=['POST'])
-@login_required
-def rename_image(image_id):
-    image = Image.query.get_or_404(image_id)
-    
-    # 检查权限
-    if image.folder.user_id != current_user.id:
-        return jsonify({'success': False, 'error': '没有权限'}), 403
-    
-    # 获取新名称
-    data = request.get_json()
-    if not data or 'name' not in data:
-        return jsonify({'success': False, 'error': '缺少名称参数'}), 400
-    
-    new_name = data['name'].strip()
-    if not new_name:
-        return jsonify({'success': False, 'error': '新名称不能为空'}), 400
-    
-    # 更新文件名
-    image.original_filename = new_name
-    db.session.commit()
-    
-    return jsonify({'success': True})
-
 @app.route('/image/<int:image_id>/update', methods=['POST'])
 @login_required
 def update_exif_by_image_id(image_id):
@@ -647,6 +623,54 @@ def delete_image(folder_id, image_id):
         flash(f'删除图片失败: {str(e)}', 'error')
     
     return redirect(url_for('view_folder', folder_id=folder_id))
+
+@app.route('/rename_image', methods=['POST'])
+@login_required
+def rename_image():
+    image_id = request.form.get('image_id')
+    new_filename = request.form.get('new_filename')
+    
+    if not image_id or not new_filename:
+        flash('请提供有效的图片ID和新文件名', 'danger')
+        return redirect(url_for('index'))
+    
+    try:
+        # 获取图片信息
+        image = Image.query.get_or_404(image_id)
+        
+        # 检查权限（确保当前用户有权限修改此图片）
+        folder = Folder.query.get_or_404(image.folder_id)
+        if folder.user_id != current_user.id:
+            flash('您没有权限修改此图片', 'danger')
+            return redirect(url_for('index'))
+        
+        # 获取文件扩展名
+        file_ext = os.path.splitext(image.filename)[1]
+        
+        # 构建新的文件名（保留原扩展名）
+        sanitized_filename = secure_filename(new_filename + file_ext)
+        
+        # 构建文件路径
+        old_path = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), 
+                               str(image.folder_id), image.filename)
+        new_path = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id), 
+                               str(image.folder_id), sanitized_filename)
+        
+        # 重命名文件
+        os.rename(old_path, new_path)
+        
+        # 更新数据库
+        image.original_filename = new_filename + file_ext
+        image.filename = sanitized_filename
+        db.session.commit()
+        
+        flash('图片重命名成功', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'重命名图片失败: {str(e)}', 'danger')
+    
+    # 重定向回文件夹页面
+    return redirect(url_for('view_folder', folder_id=image.folder_id))
 
 if __name__ == '__main__':
     app.run(debug=True,port=5004,host='0.0.0.0')
