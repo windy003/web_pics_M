@@ -8,7 +8,7 @@ from models import db, User, Folder, Image
 
 
 # CustomTag
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask_migrate import Migrate
 from PIL import Image as PILImage
 import piexif
@@ -23,10 +23,9 @@ app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # 设置为7天
+app.config['REMEMBER_COOKIE_DURATION'] = timedelta(days=14)  # 记住我功能的cookie持续时间
 
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 限制上传文件大小为16MB 
 
 # 初始化扩展
 db.init_app(app)
@@ -94,32 +93,6 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'file' not in request.files:
-        flash('没有选择文件')
-        return redirect(request.url)
-    
-    file = request.files['file']
-    
-    if file.filename == '':
-        flash('没有选择文件')
-        return redirect(request.url)
-    
-    if file and allowed_file(file.filename):
-        # 生成唯一文件名，避免冲突
-        original_filename = secure_filename(file.filename)
-        extension = original_filename.rsplit('.', 1)[1].lower()
-        unique_filename = f"{uuid.uuid4().hex}.{extension}"
-        
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-        file.save(filepath)
-        
-        flash('文件上传成功')
-        return redirect(url_for('edit_exif', filename=unique_filename))
-    
-    flash('不支持的文件类型')
-    return redirect(url_for('index'))
 
 @app.route('/image/<int:user_id>/<int:folder_id>/<filename>')
 @login_required
