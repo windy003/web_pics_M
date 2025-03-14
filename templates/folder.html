@@ -33,9 +33,13 @@
                             <span class="image-name">{{ image.original_filename }}</span>
                             <div class="image-actions">
                                 <a href="{{ url_for('edit_exif', image_id=image.id) }}" class="btn btn-sm">编辑EXIF</a>
-                                <button type="button" class="btn btn-sm btn-primary" onclick="showRenameModal('{{ image.id }}', '{{ image.original_filename }}')">
-                                    重命名
-                                </button>
+                                <div class="card-actions">
+                                    <button type="button" class="btn btn-sm btn-primary" 
+                                            data-bs-toggle="modal" data-bs-target="#renameModal" 
+                                            onclick="prepareRenameModal('{{ image.id }}', '{{ image.original_filename }}')">
+                                        重命名
+                                    </button>
+                                </div>
                                 <form method="POST" action="{{ url_for('delete_image', folder_id=folder.id, image_id=image.id) }}" class="delete-form" onsubmit="return confirm('确定要删除此图片吗？')">
                                     <button type="submit" class="btn btn-sm btn-danger">删除</button>
                                 </form>
@@ -83,6 +87,9 @@
         </div>
     </div>
 </div>
+
+<!-- 确保 Bootstrap JS 正确加载 -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>
 function enlargeImage(img, imageId) {
@@ -189,8 +196,17 @@ document.querySelectorAll('.delete-form button').forEach(button => {
     });
 });
 
-function showRenameModal(imageId, currentFilename) {
-    console.log("打开重命名模态框，图片ID:", imageId, "当前文件名:", currentFilename);
+function toggleRenameForm(formId) {
+    const form = document.getElementById(formId);
+    if (form.style.display === "none") {
+        form.style.display = "block";
+    } else {
+        form.style.display = "none";
+    }
+}
+
+function prepareRenameModal(imageId, currentFilename) {
+    console.log("准备重命名模态框，图片ID:", imageId, "当前文件名:", currentFilename);
     
     // 设置要重命名的图片ID
     document.getElementById('image_id').value = imageId;
@@ -198,10 +214,6 @@ function showRenameModal(imageId, currentFilename) {
     // 设置当前文件名作为默认值（去掉扩展名）
     let filename = currentFilename.split('.').slice(0, -1).join('.');
     document.getElementById('new_filename').value = filename;
-    
-    // 显示模态框
-    var renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
-    renameModal.show();
 }
 </script>
 
