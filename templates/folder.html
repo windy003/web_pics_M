@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="folder-header">
+        <h1>{{ folder.name }}</h1>
+        <a href="{{ url_for('index') }}" class="btn">返回首页</a>
+    </div>
+
+    <!-- 上传图片表单 -->
+    <div class="upload-section">
+        <h2>上传图片</h2>
+        <form method="POST" action="{{ url_for('upload_image', folder_id=folder.id) }}" enctype="multipart/form-data">
+            <div class="form-group">
+                <input type="file" name="files" multiple accept=".jpg,.jpeg,.png,.gif,.tiff" required>
+                <button type="submit" class="btn">上传</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 图片列表 -->
+    <div class="images-section">
+        <h2>文件夹内容</h2>
+        {% if folder.images %}
+            <div class="image-grid">
+                {% for image in folder.images %}
+                    <div class="image-card" id="image-{{ image.id }}">
+                        <img src="{{ url_for('uploaded_file', user_id=current_user.id, folder_id=folder.id, filename=image.filename) }}" alt="{{ image.original_filename }}" class="enlargeable-image" onclick="enlargeImage(this)">
+                        <div class="image-info">
+                            <span class="image-name">{{ image.original_filename }}</span>
+                            <div class="image-actions">
+                                <a href="{{ url_for('edit_exif', image_id=image.id) }}" class="btn btn-sm">编辑EXIF</a>
+                                <button class="btn btn-sm" onclick="showImageRenameForm({{ image.id }})">重命名</button>
+                                <form method="POST" action="{{ url_for('delete_image', image_id=image.id) }}" class="inline-form" onsubmit="return confirm('确定要删除这张图片吗？')">
+                                    <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% else %}
+            <p class="no-images">文件夹是空的</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- 全屏显示容器 -->
+<div id="image-modal" class="modal" onclick="closeModal()">
+    <span class="close-btn" onclick="closeModal()">&times;</span>
+    <img class="modal-content" id="modal-image">
+</div>
+
+<script>
+function showImageRenameForm(imageId) {
+    const imageCard = document.getElementById(`image-${imageId}`);
+    const currentName = imageCard.querySelector('.image-name').textContent;
+    const newName = prompt('请输入新的图片名称:', currentName);
+    
+    if (newName && newName.trim() !== currentName) {
+        fetch(`/image/${imageId}/rename`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: newName.trim() })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw err; });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                imageCard.querySelector('.image-name').textContent = newName.trim();
+            }
+        })
+        .catch(error => {
+            alert(error.error || '操作失败，请重试');
+        });
+    }
+}
+
+function enlargeImage(img) {
+    // 获取模态框和模态图片元素
+    const modal = document.getElementById("image-modal");
+    const modalImg = document.getElementById("modal-image");
+    
+    // 显示模态框并设置图片
+    modal.style.display = "block";
+    modalImg.src = img.src;
+    modalImg.alt = img.alt;
+}
+
+function closeModal() {
+    // 隐藏模态框
+    document.getElementById("image-modal").style.display = "none";
+}
+
+// 点击ESC键关闭模态框
+document.addEventListener('keydown', function(event) {
+    if (event.key === "Escape") {
+        closeModal();
+    }
+});
+</script>
+{% endblock %} 

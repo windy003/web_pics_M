@@ -1,0 +1,441 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_from_directory, send_file, abort
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+import os
+import uuid
+from werkzeug.utils import secure_filename
+from exif_utils import get_exif_data, modify_exif_info, get_unused_tag_id
+from models import db, User, Folder, Image
+from datetime import datetime
+
+app = Flask(__name__)
+app.secret_key = 'your_secret_key'  # 用于flash消息
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'gif', 'tiff'}
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 限制上传文件大小为16MB
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+
+# 初始化扩展
+db.init_app(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return db.session.get(User, int(user_id))
+
+# 确保上传目录存在
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# 在应用上下文中创建数据库表
+with app.app_context():
+    db.create_all()
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = User.query.filter_by(username=username).first()
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for('index'))
+        flash('用户名或密码错误')
+    return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        if User.query.filter_by(username=username).first():
+            flash('用户名已存在')
+            return redirect(url_for('register'))
+        user = User(username=username)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        # 创建用户的上传目录
+        os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], str(user.id)), exist_ok=True)
+        flash('注册成功，请登录')
+        return redirect(url_for('login'))
+    return render_template('register.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/')
+@login_required
+def index():
+    folders = Folder.query.filter_by(user_id=current_user.id).all()
+    return render_template('index.html', folders=folders)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        flash('没有选择文件')
+        return redirect(request.url)
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        flash('没有选择文件')
+        return redirect(request.url)
+    
+    if file and allowed_file(file.filename):
+        # 生成唯一文件名，避免冲突
+        original_filename = secure_filename(file.filename)
+        extension = original_filename.rsplit('.', 1)[1].lower()
+        unique_filename = f"{uuid.uuid4().hex}.{extension}"
+        
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(filepath)
+        
+        flash('文件上传成功')
+        return redirect(url_for('edit_exif', filename=unique_filename))
+    
+    flash('不支持的文件类型')
+    return redirect(url_for('index'))
+
+@app.route('/image/<int:user_id>/<int:folder_id>/<filename>')
+@login_required
+def uploaded_file(user_id, folder_id, filename):
+    # 检查权限
+    if user_id != current_user.id:
+        abort(403)
+    
+    # 构建文件路径
+    file_path = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(user_id),
+        str(folder_id),
+        filename
+    )
+    
+    # 检查文件是否存在
+    if not os.path.exists(file_path):
+        abort(404)
+    
+    return send_file(file_path)
+
+@app.route('/edit/image/<int:image_id>')
+@login_required
+def edit_exif(image_id):
+    # 获取图片记录
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限（确保用户只能编辑自己文件夹中的图片）
+    if image.folder.user_id != current_user.id:
+        flash('没有权限编辑此图片')
+        return redirect(url_for('index'))
+    
+    # 构建文件路径
+    filepath = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(current_user.id),
+        str(image.folder_id),
+        image.filename
+    )
+    
+    if not os.path.exists(filepath):
+        flash('文件不存在')
+        return redirect(url_for('index'))
+    
+    # 获取EXIF数据
+    exif_data, tag_ids = get_exif_data(filepath)
+    
+    # 获取常用EXIF标签列表
+    common_tags = {
+        "Make": "相机制造商",
+        "Model": "相机型号",
+        "Orientation": "方向",
+        "DateTime": "日期时间",
+        "Artist": "作者",
+        "Copyright": "版权",
+        "DateTimeOriginal": "原始拍摄时间",
+        "DateTimeDigitized": "数字化时间",
+        "UserComment": "用户评论",
+        "XPTitle": "标题",
+        "XPComment": "备注",
+        "XPAuthor": "作者",
+        "XPKeywords": "关键词",
+        "XPSubject": "主题"
+    }
+    
+    return render_template('edit.html', 
+                         image=image,
+                         exif_data=exif_data, 
+                         tag_ids=tag_ids, 
+                         common_tags=common_tags)
+
+@app.route('/api/exif/<filename>', methods=['GET'])
+def get_exif(filename):
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': '文件不存在'}), 404
+    
+    # 获取EXIF数据
+    exif_data, tag_ids = get_exif_data(filepath)
+    
+    # 转换为前端可用的格式
+    exif_list = []
+    for tag_name, value in exif_data.items():
+        exif_list.append({
+            'tag_name': tag_name,
+            'tag_id': tag_ids.get(tag_name, ''),
+            'value': str(value)
+        })
+    
+    return jsonify(exif_list)
+
+@app.route('/api/exif/<filename>', methods=['POST'])
+def update_exif(filename):
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': '文件不存在'}), 404
+    
+    data = request.json
+    action = data.get('action')
+    
+    if action == 'add':
+        tag_name = data.get('tag_name')
+        value = data.get('value')
+        
+        if not tag_name or not value:
+            return jsonify({'error': '标签名和值不能为空'}), 400
+        
+        custom_data = {tag_name: value}
+        modify_exif_info(filepath, custom_data=custom_data)
+        
+        return jsonify({'success': True, 'message': f'已添加标签: {tag_name}'})
+    
+    elif action == 'delete':
+        tag_id = data.get('tag_id')
+        
+        if not tag_id:
+            return jsonify({'error': '标签ID不能为空'}), 400
+        
+        try:
+            tag_id = int(tag_id)
+            modify_exif_info(filepath, tags_to_delete=[tag_id])
+            return jsonify({'success': True, 'message': f'已删除标签ID: {tag_id}'})
+        except ValueError:
+            return jsonify({'error': '无效的标签ID'}), 400
+    
+    return jsonify({'error': '无效的操作'}), 400
+
+@app.route('/image/<int:image_id>/delete', methods=['POST'])
+@login_required
+def delete_image(image_id):
+    # 获取图片记录
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限（确保用户只能删除自己文件夹中的图片）
+    if image.folder.user_id != current_user.id:
+        flash('没有权限删除此图片')
+        return redirect(url_for('index'))
+    
+    # 构建文件路径
+    filepath = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(current_user.id),
+        str(image.folder_id),
+        image.filename
+    )
+    
+    # 删除文件
+    if os.path.exists(filepath):
+        os.remove(filepath)
+    
+    # 删除数据库记录
+    db.session.delete(image)
+    db.session.commit()
+    
+    flash('图片已删除')
+    return redirect(url_for('view_folder', folder_id=image.folder_id))
+
+@app.route('/folder/create', methods=['POST'])
+@login_required
+def create_folder():
+    name = request.form.get('name')
+    if not name:
+        flash('文件夹名称不能为空')
+        return redirect(url_for('index'))
+    
+    # 检查是否存在同名文件夹
+    existing_folder = Folder.query.filter_by(
+        user_id=current_user.id,
+        name=name
+    ).first()
+    
+    if existing_folder:
+        flash('同名文件夹已存在')
+        return redirect(url_for('index'))
+    
+    # 创建新文件夹
+    folder = Folder(name=name, user_id=current_user.id)
+    db.session.add(folder)
+    db.session.commit()
+    
+    # 创建对应的物理文件夹
+    folder_path = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(current_user.id),
+        str(folder.id)
+    )
+    os.makedirs(folder_path, exist_ok=True)
+    
+    flash('文件夹创建成功')
+    return redirect(url_for('index'))
+
+@app.route('/folder/<int:folder_id>/delete', methods=['POST'])
+@login_required
+def delete_folder(folder_id):
+    folder = Folder.query.get_or_404(folder_id)
+    if folder.user_id != current_user.id:
+        flash('没有权限删除此文件夹')
+        return redirect(url_for('index'))
+    
+    # 删除文件夹中的所有图片
+    for image in folder.images:
+        file_path = os.path.join(
+            app.config['UPLOAD_FOLDER'],
+            str(current_user.id),
+            str(folder.id),
+            image.filename
+        )
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    
+    # 删除物理文件夹
+    folder_path = os.path.join(
+        app.config['UPLOAD_FOLDER'],
+        str(current_user.id),
+        str(folder.id)
+    )
+    if os.path.exists(folder_path):
+        os.rmdir(folder_path)
+    
+    # 删除数据库记录
+    db.session.delete(folder)
+    db.session.commit()
+    
+    flash('文件夹删除成功')
+    return redirect(url_for('index'))
+
+@app.route('/folder/<int:folder_id>/rename', methods=['POST'])
+@login_required
+def rename_folder(folder_id):
+    folder = Folder.query.get_or_404(folder_id)
+    if folder.user_id != current_user.id:
+        return jsonify({'error': '没有权限重命名此文件夹'}), 403
+    
+    new_name = request.form.get('name')
+    if not new_name:
+        return jsonify({'error': '文件夹名称不能为空'}), 400
+    
+    # 检查新名称是否已存在
+    existing_folder = Folder.query.filter_by(
+        user_id=current_user.id,
+        name=new_name
+    ).first()
+    
+    if existing_folder and existing_folder.id != folder_id:
+        return jsonify({'error': '同名文件夹已存在'}), 400
+    
+    folder.name = new_name
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+@app.route('/folder/<int:folder_id>')
+@login_required
+def view_folder(folder_id):
+    folder = Folder.query.get_or_404(folder_id)
+    if folder.user_id != current_user.id:
+        flash('没有权限访问此文件夹')
+        return redirect(url_for('index'))
+    
+    return render_template('folder.html', folder=folder)
+
+@app.route('/folder/<int:folder_id>/upload', methods=['POST'])
+@login_required
+def upload_image(folder_id):
+    folder = Folder.query.get_or_404(folder_id)
+    if folder.user_id != current_user.id:
+        return jsonify({'error': '没有权限上传到此文件夹'}), 403
+    
+    if 'files' not in request.files:
+        flash('没有选择文件')
+        return redirect(url_for('view_folder', folder_id=folder_id))
+    
+    files = request.files.getlist('files')
+    if not files or all(file.filename == '' for file in files):
+        flash('没有选择文件')
+        return redirect(url_for('view_folder', folder_id=folder_id))
+    
+    success_count = 0
+    for file in files:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            # 生成唯一文件名
+            unique_filename = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{filename}"
+            
+            # 保存文件
+            file_path = os.path.join(
+                app.config['UPLOAD_FOLDER'],
+                str(current_user.id),
+                str(folder_id),
+                unique_filename
+            )
+            file.save(file_path)
+            
+            # 创建图片记录
+            image = Image(
+                filename=unique_filename,
+                original_filename=filename,
+                folder_id=folder_id
+            )
+            db.session.add(image)
+            success_count += 1
+    
+    db.session.commit()
+    flash(f'成功上传 {success_count} 张图片')
+    
+    return redirect(url_for('view_folder', folder_id=folder_id))
+
+@app.route('/image/<int:image_id>/rename', methods=['POST'])
+@login_required
+def rename_image(image_id):
+    image = Image.query.get_or_404(image_id)
+    
+    # 检查权限
+    if image.folder.user_id != current_user.id:
+        return jsonify({'success': False, 'error': '没有权限'}), 403
+    
+    # 获取新名称
+    data = request.get_json()
+    if not data or 'name' not in data:
+        return jsonify({'success': False, 'error': '缺少名称参数'}), 400
+    
+    new_name = data['name'].strip()
+    if not new_name:
+        return jsonify({'success': False, 'error': '新名称不能为空'}), 400
+    
+    # 更新文件名
+    image.original_filename = new_name
+    db.session.commit()
+    
+    return jsonify({'success': True})
+
+if __name__ == '__main__':
+    app.run(debug=True,port=5004,host='0.0.0.0')

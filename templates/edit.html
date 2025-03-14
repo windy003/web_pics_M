@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>编辑EXIF信息</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>编辑EXIF信息</h1>
+        
+        <div class="image-preview">
+            <img src="{{ url_for('uploaded_file', filename=filename) }}" alt="{{ filename }}">
+            <p>文件名: {{ filename }}</p>
+        </div>
+        
+        <div class="exif-section">
+            <h2>EXIF信息</h2>
+            
+            {% if exif_data %}
+                <div class="exif-table-container">
+                    <table class="exif-table">
+                        <thead>
+                            <tr>
+                                <th>标签名称</th>
+                                <th>标签ID</th>
+                                <th>值</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="exif-data">
+                            {% for tag_name, value in exif_data.items() %}
+                                <tr>
+                                    <td>{{ tag_name }}</td>
+                                    <td>{{ tag_ids[tag_name] }}</td>
+                                    <td>{{ value }}</td>
+                                    <td>
+                                        <button class="btn btn-danger btn-sm" onclick="deleteExif('{{ tag_ids[tag_name] }}')">删除</button>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p>没有找到EXIF信息</p>
+            {% endif %}
+            
+            <div class="add-exif-section">
+                <h3>添加/修改EXIF标签</h3>
+                <form id="add-exif-form">
+                    <div class="form-group">
+                        <label for="tag-name">标签名称:</label>
+                        <input type="text" id="tag-name" name="tag-name" list="common-tags" required>
+                        <datalist id="common-tags">
+                            {% for tag_name, description in common_tags.items() %}
+                                <option value="{{ tag_name }}">{{ description }}</option>
+                            {% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label for="tag-value">标签值:</label>
+                        <input type="text" id="tag-value" name="tag-value" required>
+                    </div>
+                    <button type="submit" class="btn">添加/修改</button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <a href="{{ url_for('index') }}" class="btn">返回首页</a>
+        </div>
+    </div>
+    
+    <script>
+        // 添加EXIF标签
+        document.getElementById('add-exif-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const tagName = document.getElementById('tag-name').value;
+            const tagValue = document.getElementById('tag-value').value;
+            
+            if (!tagName || !tagValue) {
+                alert('标签名和值不能为空');
+                return;
+            }
+            
+            fetch(`/api/exif/{{ filename }}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'add',
+                    tag_name: tagName,
+                    value: tagValue
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    // 刷新页面以显示更新后的EXIF数据
+                    location.reload();
+                } else {
+                    alert(data.error || '操作失败');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('操作失败，请重试');
+            });
+        });
+        
+        // 删除EXIF标签
+        function deleteExif(tagId) {
+            if (!confirm('确定要删除这个EXIF标签吗？')) {
+                return;
+            }
+            
+            fetch(`/api/exif/{{ filename }}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'delete',
+                    tag_id: tagId
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    // 刷新页面以显示更新后的EXIF数据
+                    location.reload();
+                } else {
+                    alert(data.error || '操作失败');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('操作失败，请重试');
+            });
+        }
+    </script>
+</body>
+</html> 

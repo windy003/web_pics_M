@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h1>我的图片管理</h1>
+    
+    <!-- 创建文件夹表单 -->
+    <div class="create-folder">
+        <form method="POST" action="{{ url_for('create_folder') }}">
+            <div class="form-group">
+                <input type="text" name="name" placeholder="新建文件夹名称" required>
+                <button type="submit" class="btn">创建文件夹</button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- 文件夹列表 -->
+    <div class="folders">
+        {% if folders %}
+            {% for folder in folders %}
+                <div class="folder-item" id="folder-{{ folder.id }}">
+                    <div class="folder-info">
+                        <span class="folder-name">{{ folder.name }}</span>
+                        <div class="folder-actions">
+                            <button class="btn btn-sm" onclick="showRenameForm({{ folder.id }})">重命名</button>
+                            <a href="{{ url_for('view_folder', folder_id=folder.id) }}" class="btn btn-sm">打开</a>
+                            <form method="POST" action="{{ url_for('delete_folder', folder_id=folder.id) }}" class="inline-form" onsubmit="return confirm('确定要删除此文件夹吗？文件夹内的所有图片都会被删除。')">
+                                <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <p class="no-folders">还没有创建任何文件夹</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function showRenameForm(folderId) {
+    const folderDiv = document.getElementById(`folder-${folderId}`);
+    const currentName = folderDiv.querySelector('.folder-name').textContent;
+    const newName = prompt('请输入新的文件夹名称:', currentName);
+    
+    if (newName && newName !== currentName) {
+        fetch(`/folder/${folderId}/rename`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `name=${encodeURIComponent(newName)}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                folderDiv.querySelector('.folder-name').textContent = newName;
+            } else {
+                alert(data.error || '重命名失败');
+            }
+        })
+        .catch(error => {
+            alert('操作失败，请重试');
+        });
+    }
+}
+</script>
+{% endblock %} 
