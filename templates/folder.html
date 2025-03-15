@@ -10,11 +10,11 @@
     <!-- 上传图片表单 -->
     <div class="upload-section">
         <h2>上传图片</h2>
-        <form method="POST" action="{{ url_for('upload_image', folder_id=folder.id) }}" enctype="multipart/form-data">
-            <div class="form-group">
-                <input type="file" name="files" multiple accept=".jpg,.jpeg,.png,.gif,.tiff" required>
-                <button type="submit" class="btn">上传</button>
-            </div>
+        <form id="upload-form" enctype="multipart/form-data">
+            <input type="file" id="fileInput" name="file">
+            <!-- 添加隐藏的 folder_id 字段 -->
+            <input type="hidden" name="folder_id" value="{{ folder.id }}">
+            <button type="submit">上传</button>
         </form>
     </div>
 
@@ -25,7 +25,7 @@
             <div class="image-grid">
                 {% for image in folder.images %}
                     <div class="image-card" id="image-{{ image.id }}">
-                        <img src="{{ url_for('uploaded_file', user_id=current_user.id, folder_id=folder.id, filename=image.filename) }}" 
+                        <img src="{{ url_for('uploads', user_id=image.user_id, folder_id=image.folder_id, filename=image.filename) }}" 
                              alt="{{ image.original_filename }}" 
                              class="thumbnail"
                              onclick="enlargeImage(this, {{ image.id }})">
@@ -185,6 +185,87 @@ function prepareRenameModal(imageId, currentFilename) {
 document.addEventListener('touchstart', function(e) {
     e.stopPropagation(); // 移除这行如果存在
 }, { passive: true });
+
+// 计算文件的 SHA-256 哈希值
+async function calculateFileHash(file) {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    console.log('文件哈希值:', hashHex);
+    return hashHex;
+}
+
+// 修改文件上传处理
+document.getElementById('upload-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('fileInput');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('请选择文件');
+        return;
+    }
+    
+    try {
+        // 计算文件哈希
+        const arrayBuffer = await file.arrayBuffer();
+        const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        
+        // 从URL获取folder_id
+        const urlParts = window.location.pathname.split('/');
+        const folderIdIndex = urlParts.indexOf('folder') + 1;
+        const folderId = urlParts[folderIdIndex];
+        
+        // 先检查文件是否已存在
+        const checkResponse = await fetch('/check_file_exists', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                file_hash: hashHex,
+                folder_id: folderId
+            })
+        });
+        
+        const checkResult = await checkResponse.json();
+        
+        if (checkResult.exists) {
+            // 文件已存在，询问用户是否继续
+            if (!confirm('相同内容的图片已存在，文件名为：' + checkResult.filename + '。是否仍要上传？')) {
+                return; // 用户选择不上传
+            }
+        }
+        
+        // 创建FormData
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('file_hash', hashHex);
+        formData.append('folder_id', folderId);
+        
+        // 发送上传请求
+        const response = await fetch('/upload', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('上传成功');
+            window.location.reload(); // 刷新页面
+        } else {
+            alert('上传失败: ' + (data.error || '未知错误'));
+        }
+    } catch (error) {
+        console.error('上传失败:', error);
+        alert('上传失败: ' + error.message);
+    }
+});
 </script>
 
 <style>
@@ -269,7 +350,8 @@ document.addEventListener('touchstart', function(e) {
 }
 
 .fullscreen-image {
-    touch-action: pinch-zoom; /* 允许捏合缩放 */
+    pointer-events: auto; /* 确保图片可以接收触摸事件 */
+    touch-action: manipulation; /* 允许触摸操作 */
 }
 </style>
 {% endblock %} 

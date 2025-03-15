@@ -15,6 +15,7 @@ import piexif
 import json
 from io import BytesIO
 import base64
+import hashlib
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY')  # 用于flash消息
@@ -399,12 +400,17 @@ def rename_folder(folder_id):
 @app.route('/folder/<int:folder_id>')
 @login_required
 def view_folder(folder_id):
-    folder = Folder.query.get_or_404(folder_id)
-    if folder.user_id != current_user.id:
-        flash('没有权限访问此文件夹')
+    app.logger.info(f"查看文件夹 {folder_id}")
+    folder = db.session.get(Folder, folder_id)
+    if not folder or folder.user_id != current_user.id:
+        flash('文件夹不存在或您没有权限访问')
         return redirect(url_for('index'))
     
-    return render_template('folder.html', folder=folder)
+    # 获取文件夹中的所有图片
+    images = Image.query.filter_by(folder_id=folder_id).all()
+    print(f"找到 {len(images)} 张图片")
+    
+    return render_template('folder.html', folder=folder, images=images)
 
 @app.route('/folder/<int:folder_id>/upload', methods=['POST'])
 @login_required
@@ -653,6 +659,125 @@ def rename_image():
     
     # 重定向回文件夹页面
     return redirect(url_for('view_folder', folder_id=image.folder_id))
+
+@app.route('/check_file_exists', methods=['POST'])
+@login_required
+def check_file_exists():
+    data = request.json
+    file_hash = data.get('file_hash')
+    folder_id = data.get('folder_id')
+    
+    if not file_hash or not folder_id:
+        return jsonify({'error': '缺少必要参数'}), 400
+    
+    # 检查是否已存在相同哈希值的图片
+    existing_image = Image.query.filter_by(
+        file_hash=file_hash, 
+        folder_id=folder_id
+    ).first()
+    
+    if existing_image:
+        return jsonify({
+            'exists': True,
+            'image_id': existing_image.id,
+            'filename': existing_image.original_filename
+        })
+    else:
+        return jsonify({'exists': False})
+
+@app.route('/upload', methods=['POST'])
+@login_required
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': '未选择文件'}), 400
+
+    file = request.files['file']
+    folder_id = request.form.get('folder_id')
+    file_hash = request.form.get('file_hash')
+    
+    if not folder_id:
+        return jsonify({'error': '缺少文件夹ID'}), 400
+        
+    if file.filename == '':
+        return jsonify({'error': '未选择文件'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': '文件类型不被允许'}), 400
+
+    try:
+        # 检查是否已存在相同哈希值的图片
+        existing_image = Image.query.filter_by(
+            file_hash=file_hash, 
+            folder_id=folder_id
+        ).first()
+        
+        if existing_image:
+            # 如果在同一文件夹中已存在相同哈希值的图片，返回提示
+            return jsonify({
+                'success': False,
+                'error': '相同内容的图片已存在',
+                'existing_image_id': existing_image.id,
+                'existing_filename': existing_image.original_filename
+            }), 409  # 409 Conflict
+        
+        # 创建用户和文件夹的目录结构
+        user_folder = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id))
+        if not os.path.exists(user_folder):
+            os.makedirs(user_folder)
+            
+        folder_path = os.path.join(user_folder, str(folder_id))
+        if not os.path.exists(folder_path):
+            os.makedirs(folder_path)
+        
+        # 生成安全的文件名
+        filename = secure_filename(str(uuid.uuid4()) + os.path.splitext(file.filename)[1])
+        
+        # 完整的文件路径
+        file_path = os.path.join(folder_path, filename)
+        
+        # 保存文件
+        file.save(file_path)
+        
+        # 保存到数据库
+        new_image = Image(
+            filename=filename,
+            original_filename=file.filename,
+            folder_id=int(folder_id),
+            user_id=current_user.id,
+            file_hash=file_hash,
+            upload_date=datetime.utcnow()
+        )
+        db.session.add(new_image)
+        db.session.commit()
+        
+        print(f"文件已保存: {file_path}")
+        
+        return jsonify({
+            'success': True, 
+            'filename': filename,
+            'original_filename': file.filename,
+            'id': new_image.id
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        print(f"上传失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/uploads/<int:user_id>/<int:folder_id>/<filename>')
+@login_required
+def uploads(user_id, folder_id, filename):
+    # 安全检查：确保当前用户只能访问自己的文件
+    if user_id != current_user.id:
+        abort(403)  # 禁止访问
+    
+    # 检查文件夹是否属于当前用户
+    folder = db.session.get(Folder, folder_id)
+    if not folder or folder.user_id != current_user.id:
+        abort(403)  # 禁止访问
+    
+    # 构建文件路径
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], str(user_id), str(folder_id))
+    return send_from_directory(file_path, filename)
 
 if __name__ == '__main__':
     app.run(debug=True,port=5004,host='0.0.0.0')
