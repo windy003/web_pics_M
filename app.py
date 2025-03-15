@@ -712,13 +712,14 @@ def upload_file():
         ).first()
         
         if existing_image:
-            # 如果在同一文件夹中已存在相同哈希值的图片，返回提示
+            # 如果在同一文件夹中已存在相同哈希值的图片，返回成功但标记为跳过
             return jsonify({
-                'success': False,
-                'error': '相同内容的图片已存在',
+                'success': True,
+                'skipped': True,
+                'message': '相同内容的图片已存在',
                 'existing_image_id': existing_image.id,
                 'existing_filename': existing_image.original_filename
-            }), 409  # 409 Conflict
+            }), 200
         
         # 创建用户和文件夹的目录结构
         user_folder = os.path.join(app.config['UPLOAD_FOLDER'], str(current_user.id))
@@ -754,6 +755,7 @@ def upload_file():
         
         return jsonify({
             'success': True, 
+            'skipped': False,
             'filename': filename,
             'original_filename': file.filename,
             'id': new_image.id
@@ -761,7 +763,7 @@ def upload_file():
     except Exception as e:
         db.session.rollback()
         print(f"上传失败: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/uploads/<int:user_id>/<int:folder_id>/<filename>')
 @login_required
